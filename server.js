@@ -3,13 +3,14 @@ const https = require('https');
 const fs = require('fs');
 const path = require('path');
 
-const PORT = 3000;
+// Railway automatically sets PORT — must use it
+const PORT = process.env.PORT || 3000;
 
-// Read API key from key.txt
+// Read API key — Railway env var or local key.txt
 let API_KEY = process.env.OPENROUTER_API_KEY || '';
 try {
   const keyFile = path.join(__dirname, 'key.txt');
-  if (fs.existsSync(keyFile)) {
+  if (!API_KEY && fs.existsSync(keyFile)) {
     API_KEY = fs.readFileSync(keyFile, 'utf8').trim();
   }
 } catch(e) {}
@@ -30,11 +31,18 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // Health check
+  if (req.method === 'GET' && req.url === '/health') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ status: 'ok', port: PORT }));
+    return;
+  }
+
   // Chat API
   if (req.method === 'POST' && req.url === '/api/chat') {
     if (!API_KEY) {
       res.writeHead(500, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: 'API key not set in key.txt' }));
+      res.end(JSON.stringify({ error: 'OPENROUTER_API_KEY not set in Railway Variables' }));
       return;
     }
 
@@ -43,12 +51,8 @@ const server = http.createServer((req, res) => {
     req.on('end', () => {
       try {
         const { messages, system } = JSON.parse(body);
-
-        // Build messages array with system prompt as first user message
         const allMessages = [];
-        if (system) {
-          allMessages.push({ role: 'system', content: system });
-        }
+        if (system) allMessages.push({ role: 'system', content: system });
         allMessages.push(...messages);
 
         const payload = JSON.stringify({
@@ -65,7 +69,7 @@ const server = http.createServer((req, res) => {
           headers: {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${API_KEY}`,
-            'HTTP-Referer': 'http://localhost:3000',
+            'HTTP-Referer': 'https://aj-chatbot-production.up.railway.app',
             'X-Title': 'AJ Chat',
             'Content-Length': Buffer.byteLength(payload)
           }
@@ -83,7 +87,6 @@ const server = http.createServer((req, res) => {
                 return;
               }
               const text = parsed?.choices?.[0]?.message?.content || '';
-              // Return in same format frontend expects
               res.writeHead(200, { 'Content-Type': 'application/json' });
               res.end(JSON.stringify({ content: [{ type: 'text', text }] }));
             } catch(e) {
@@ -112,16 +115,8 @@ const server = http.createServer((req, res) => {
   res.writeHead(404); res.end('Not found');
 });
 
-server.listen(PORT, () => {
-  console.log('');
-  console.log('  ✦ AJ Chat — Powered by OpenRouter (FREE Llama 3.3 70B)');
-  console.log('  → Open: http://localhost:' + PORT);
-  console.log('');
-  if (!API_KEY) {
-    console.log('  ⚠  Get FREE key: https://openrouter.ai  → Sign up → API Keys');
-    console.log('  → Paste in key.txt and restart');
-  } else {
-    console.log('  ✓ API key loaded — Ready!');
-  }
-  console.log('');
+// Must bind to 0.0.0.0 for Railway
+server.listen(PORT, '0.0.0.0', () => {
+  console.log(`AJ Chat running on 0.0.0.0:${PORT}`);
+  console.log(`API Key: ${API_KEY ? 'Loaded ✓' : 'NOT SET ✗'}`);
 });
